@@ -1,0 +1,40 @@
+name: Upload S3 log summaries
+description: Copy the access summaries out of an extraction cache into a cloned repository, then commit and push them.
+
+inputs:
+  extraction-cache-path:
+    description: Path to the extraction cache that holds the `summaries` directory and the `ips` region coordinates.
+    required: true
+  repository-path:
+    description: >-
+      Path to a clone of the repository the summaries are published to. Its git configuration must
+      already be able to push, since it is used as found.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Copy summaries into the repository and push them
+      shell: bash
+      working-directory: ${{ inputs.extraction-cache-path }}/summaries/
+      env:
+        EXTRACTION_CACHE_PATH: ${{ inputs.extraction-cache-path }}
+        REPOSITORY_PATH: ${{ inputs.repository-path }}
+      run: |
+        mkdir -p "$REPOSITORY_PATH/content/summaries"
+        find . -type f -name '*.tsv' -exec cp --parents {} "$REPOSITORY_PATH/content/summaries/" \;
+
+        cp ./archive_totals.json "$REPOSITORY_PATH/content"
+        cp ./totals.json "$REPOSITORY_PATH/content"
+        cp \
+          "$EXTRACTION_CACHE_PATH/ips/region_codes_to_coordinates.yaml" \
+          "$REPOSITORY_PATH/content/region_codes_to_coordinates.yaml"
+
+        cd "$REPOSITORY_PATH"
+
+        git pull
+        git branch
+        git status
+        git add content
+        git commit -m "update S3 access summary content" || true
+        git push
