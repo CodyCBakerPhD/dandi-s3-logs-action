@@ -1,6 +1,6 @@
 # dandi-s3-logs-action
 
-GitHub Actions for running `s3_log_extraction` and its [DANDI plugin](https://github.com/dandi/dandi-s3-log-extraction) on a self-hosted runner.
+GitHub action for running `s3_log_extraction` and its [DANDI plugin](https://github.com/dandi/dandi-s3-log-extraction) on a self-hosted runner.
 
 | Action | What it does |
 | --- | --- |
