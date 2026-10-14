@@ -1,0 +1,50 @@
+name: S3 log extraction command
+description: Run an `s3logextraction` command, or one of a plugin such as `dandis3logextraction`, from an environment on a self-hosted runner.
+
+inputs:
+  command:
+    description: Command to run, with spaces between the command groups. For example, `update summaries`.
+    required: true
+  flags:
+    description: Space-separated, double-dash flags to pass to the command. For example, `--mode archive`.
+    required: false
+    default: ""
+  entrypoint:
+    description: >-
+      CLI entrypoint to run the command through. Use `dandis3logextraction` for the DANDI plugin. That
+      entrypoint does not re-expose the `update ip` group, so those commands always run through
+      `s3logextraction`.
+    required: false
+    default: s3logextraction
+  env-path:
+    description: Path to the Python environment that holds the extraction packages and `duct`.
+    required: true
+  uv-path:
+    description: Path to the `uv` executable that runs the command.
+    required: true
+  flock-file:
+    description: >-
+      Lock file shared by every run on the machine. The command fails at once, rather than waiting,
+      while another run holds it.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Activate environment and run command
+      shell: bash
+      env:
+        ENV_PATH: ${{ inputs.env-path }}
+        UV_PATH: ${{ inputs.uv-path }}
+        FLOCK_FILE: ${{ inputs.flock-file }}
+        ENTRYPOINT: ${{ inputs.entrypoint }}
+        COMMAND: ${{ inputs.command }}
+        FLAGS: ${{ inputs.flags }}
+      # A composite action does not enforce `required`, and an empty path only fails later with a
+      # less obvious error. `COMMAND` and `FLAGS` are left unquoted so they split into arguments.
+      run: |
+        [ -n "$ENV_PATH" ] || { echo "::error::The env-path input must be set."; exit 1; }
+        [ -n "$UV_PATH" ] || { echo "::error::The uv-path input must be set."; exit 1; }
+        [ -n "$FLOCK_FILE" ] || { echo "::error::The flock-file input must be set."; exit 1; }
+        source "$ENV_PATH/bin/activate"
+        flock -n "$FLOCK_FILE" "$UV_PATH" run duct "$ENTRYPOINT" $COMMAND $FLAGS

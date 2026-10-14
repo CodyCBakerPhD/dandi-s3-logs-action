@@ -1,0 +1,55 @@
+ci:
+  autoupdate_schedule: quarterly
+
+default_install_hook_types:
+  - pre-commit
+
+default_language_version:
+  python: python3.11
+
+repos:
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v6.0.0
+  hooks:
+    - id: check-yaml
+    - id: end-of-file-fixer
+    - id: trailing-whitespace
+    - id: check-added-large-files
+    - id: check-case-conflict
+
+- repo: https://github.com/python-jsonschema/check-jsonschema
+  rev: 0.38.2
+  hooks:
+    - id: check-github-actions
+      args: ["--verbose"]
+      files: ^[a-z-]+/action\.yml$
+    - id: check-github-workflows
+      args: ["--verbose"]
+
+- repo: https://github.com/astral-sh/ruff-pre-commit
+  rev: v0.16.10
+  hooks:
+  - id: ruff
+    args: [ --fix ]
+
+- repo: https://github.com/codespell-project/codespell
+  rev: v2.4.3
+  hooks:
+  - id: codespell
+    additional_dependencies:
+    - tomli
+
+- repo: local
+  hooks:
+    - id: action-versions-agree
+      name: action versions agree
+      description: >-
+        The references to this repository's tag are written by hand, so this runs the tests that catch
+        them drifting from `VERSION` before the commit rather than in CI.
+      entry: pytest tests/test_actions.py --quiet
+      language: python
+      pass_filenames: false
+      files: ^(VERSION|README\.md|[a-z-]+/action\.yml|tests/test_actions\.py)$
+      additional_dependencies:
+        - pytest
+        - pyyaml
