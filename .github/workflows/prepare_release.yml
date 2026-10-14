@@ -50,8 +50,9 @@ jobs:
           TAG: ${{ steps.resolve.outputs.tag }}
         run: |
           # The bound is the last published release, asked for rather than left to the API default,
-          # which keeps it correct if a prerelease is ever cut in between.
-          PREVIOUS=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name 2>/dev/null || true)
+          # which keeps it correct if a prerelease is ever cut in between. With no release yet the
+          # lookup is a 404, and `gh` still prints the error body, so a failure must clear it.
+          PREVIOUS=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name 2>/dev/null) || PREVIOUS=""
           if [ -n "${PREVIOUS}" ]; then
             CHANGELOG=$(gh api --method POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
               -f "tag_name=${TAG}" -f "target_commitish=${GITHUB_SHA}" -f "previous_tag_name=${PREVIOUS}" --jq .body)
