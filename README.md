@@ -26,7 +26,7 @@ The commands read their secrets from the job's environment rather than from inpu
 ## Installing the packages
 
 ```yaml
-- uses: CodyCBakerPhD/dandi-s3-logs-action/install-packages@v1
+- uses: CodyCBakerPhD/dandi-s3-logs-action/install-packages@v2
   with:
     env-path: /data/s3-logs/env
     uv-path: /data/s3-logs/uv
@@ -64,7 +64,7 @@ The whole install holds the same lock as `run-command`, taken without waiting. W
 ## Running a command
 
 ```yaml
-- uses: CodyCBakerPhD/dandi-s3-logs-action/run-command@v1
+- uses: CodyCBakerPhD/dandi-s3-logs-action/run-command@v2
   with:
     command: update summaries
     flags: --mode archive --cache /data/s3-logs/extraction_cache
@@ -90,7 +90,7 @@ The lock is taken without waiting. A run that starts while another holds the loc
 ## Uploading summaries
 
 ```yaml
-- uses: CodyCBakerPhD/dandi-s3-logs-action/upload-summaries@v1
+- uses: CodyCBakerPhD/dandi-s3-logs-action/upload-summaries@v2
   with:
     extraction-cache-path: /data/s3-logs/extraction_cache
     repository-path: /data/s3-logs/access-summaries
