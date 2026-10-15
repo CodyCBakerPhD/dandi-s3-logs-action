@@ -39,6 +39,7 @@ The commands read their secrets from the job's environment rather than from inpu
 | `uv-path` | yes | | Path to the `uv` executable that creates the environment and installs the packages. |
 | `flock-file` | yes | | Lock file shared by every run on the machine. |
 | `python-version` | no | `3.14` | Python the environment runs, as `major.minor`. |
+| `recreate` | no | `false` | Set to `true` to delete the environment and create it again even when it already runs `python-version`. |
 | `s3-log-extraction` | no | `s3_log_extraction[geolocation,remote]>=1.11.10` | Requirement to install `s3_log_extraction` from. |
 | `dandi-s3-log-extraction` | no | `dandi_s3_log_extraction[geolocation,remote] @ git+https://github.com/dandi/dandi-s3-log-extraction.git@main` | Requirement to install the DANDI plugin from. The plugin has no PyPI release yet. |
 | `con-duct` | no | `con-duct` | Requirement to install `duct` from. |
@@ -47,8 +48,8 @@ The environment at `env-path` is reused from one install to the next:
 
 - If nothing is there, it is created with `uv venv` on `python-version`. `uv` downloads that Python if the runner does not have it.
 - If an environment is there on `python-version`, the packages are upgraded in place.
-- If an environment is there on any other Python, it is deleted and created again. Only the packages above are installed in the new one, so anything else installed by hand has to be installed again.
-- If something other than a virtual environment is there, the install stops and leaves it alone. A mistyped path is never deleted to make room.
+- If an environment is there on any other Python, or `recreate` is `true`, it is deleted and created again. Only the packages above are installed in the new one, so anything else installed by hand has to be installed again.
+- If something other than a virtual environment is there, the install stops and leaves it alone, whatever `recreate` says. A mistyped path is never deleted to make room.
 
 The packages are installed together with `uv pip install --upgrade`, and the versions they end up at are reported. The defaults bring everything the other actions and the extraction need:
 

@@ -22,6 +22,13 @@ inputs:
       Python the environment runs, as `major.minor`. `uv` provides it if the runner does not have it.
     required: false
     default: "3.14"
+  recreate:
+    description: >-
+      Set to `true` to delete the environment and create it again even when it already runs
+      `python-version`, for an environment that has drifted or broken. A directory that is not a virtual
+      environment is still left alone.
+    required: false
+    default: "false"
   s3-log-extraction:
     description: >-
       Requirement to install `s3_log_extraction` from. Its `geolocation` extra is needed by
@@ -51,11 +58,13 @@ runs:
         UV_PATH: ${{ inputs.uv-path }}
         FLOCK_FILE: ${{ inputs.flock-file }}
         PYTHON_VERSION: ${{ inputs.python-version }}
+        RECREATE: ${{ inputs.recreate }}
       run: |
         [ -n "$ENV_PATH" ] || { echo "::error::The env-path input must be set."; exit 1; }
         [ -n "$UV_PATH" ] || { echo "::error::The uv-path input must be set."; exit 1; }
         [ -n "$FLOCK_FILE" ] || { echo "::error::The flock-file input must be set."; exit 1; }
         [[ "$PYTHON_VERSION" =~ ^[0-9]+\.[0-9]+$ ]] || { echo "::error::The python-version input must be major.minor, such as 3.14."; exit 1; }
+        [[ "$RECREATE" =~ ^(true|false)$ ]] || { echo "::error::The recreate input must be true or false."; exit 1; }
 
     # Everything that changes the environment runs inside this one step, which holds the lock throughout.
     # Locking each command on its own would let a pipeline start between them and run on a half-built
@@ -67,6 +76,7 @@ runs:
         UV_PATH: ${{ inputs.uv-path }}
         FLOCK_FILE: ${{ inputs.flock-file }}
         PYTHON_VERSION: ${{ inputs.python-version }}
+        RECREATE: ${{ inputs.recreate }}
         S3_LOG_EXTRACTION: ${{ inputs.s3-log-extraction }}
         DANDI_S3_LOG_EXTRACTION: ${{ inputs.dandi-s3-log-extraction }}
         CON_DUCT: ${{ inputs.con-duct }}
@@ -82,7 +92,10 @@ runs:
         fi
         if [ -f "$ENV_PATH/pyvenv.cfg" ]; then
           CURRENT=$("$ENV_PATH/bin/python" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null) || CURRENT="no working Python"
-          if [ "$CURRENT" != "$PYTHON_VERSION" ]; then
+          if [ "$RECREATE" = true ]; then
+            echo "::notice::Recreating $ENV_PATH, as the recreate input asks."
+            rm -rf "$ENV_PATH"
+          elif [ "$CURRENT" != "$PYTHON_VERSION" ]; then
             echo "::notice::$ENV_PATH runs $CURRENT rather than $PYTHON_VERSION, so it is recreated."
             rm -rf "$ENV_PATH"
           fi

@@ -120,7 +120,9 @@ def _make_environment(path: pathlib.Path, python_version: str) -> None:
     python.chmod(0o755)
 
 
-def _prepare(tmp_path: pathlib.Path, env_path: pathlib.Path) -> tuple[subprocess.CompletedProcess, list[str]]:
+def _prepare(
+    tmp_path: pathlib.Path, env_path: pathlib.Path, **overrides: str,
+) -> tuple[subprocess.CompletedProcess, list[str]]:
     """Run the step that prepares the environment with its default inputs and a fake `uv`."""
     action = _load(_INSTALL_PACKAGES_PATH)
     (step,) = (step for step in action["runs"]["steps"] if step["name"] == _PREPARE_STEP_NAME)
@@ -131,6 +133,7 @@ def _prepare(tmp_path: pathlib.Path, env_path: pathlib.Path) -> tuple[subprocess
 
     inputs = {name: str(specification.get("default", "")) for name, specification in action["inputs"].items()}
     inputs |= {"env-path": str(env_path), "uv-path": str(uv), "flock-file": str(tmp_path / "flocks" / "lock")}
+    inputs |= overrides
     environment = {**os.environ, "UV_LOG": str(log)}
     for variable, expression in step["env"].items():
         environment[variable] = inputs[expression.removeprefix("${{ inputs.").removesuffix(" }}")]
@@ -184,13 +187,30 @@ def test_install_packages_recreates_an_environment_on_another_python(tmp_path: p
 
 @pytest.mark.ai_generated
 @_requires_flock
-def test_install_packages_leaves_a_directory_that_is_not_an_environment_alone(tmp_path: pathlib.Path) -> None:
-    """A mistyped `env-path`, such as the base directory, must never be deleted to make room."""
+def test_install_packages_recreates_an_environment_on_request(tmp_path: pathlib.Path) -> None:
+    env_path = tmp_path / "env"
+    _make_environment(env_path, "3.14")
+    (env_path / "drifted").touch()
+
+    result, calls = _prepare(tmp_path, env_path, recreate="true")
+
+    assert result.returncode == 0, result.stderr
+    assert not (env_path / "drifted").exists()
+    assert [call.split()[0] for call in calls] == ["venv", "pip"]
+
+
+@pytest.mark.ai_generated
+@_requires_flock
+@pytest.mark.parametrize("recreate", ["false", "true"])
+def test_install_packages_leaves_a_directory_that_is_not_an_environment_alone(
+    tmp_path: pathlib.Path, recreate: str,
+) -> None:
+    """A mistyped `env-path`, such as the base directory, must never be deleted, even when asked to recreate."""
     env_path = tmp_path / "base"
     env_path.mkdir()
     (env_path / "extraction_cache").mkdir()
 
-    result, calls = _prepare(tmp_path, env_path)
+    result, calls = _prepare(tmp_path, env_path, recreate=recreate)
 
     assert result.returncode != 0
     assert (env_path / "extraction_cache").exists()
