@@ -8,7 +8,7 @@ _REPOSITORY_ROOT = pathlib.Path(__file__).parent.parent
 _README_PATH = _REPOSITORY_ROOT / "README.md"
 _VERSION_PATH = _REPOSITORY_ROOT / "VERSION"
 _ACTION_PATHS = sorted(_REPOSITORY_ROOT.glob("*/action.yml"))
-_RUN_COMMAND_PATH = _REPOSITORY_ROOT / "run-command" / "action.yml"
+_INSTALL_PACKAGES_PATH = _REPOSITORY_ROOT / "install-packages" / "action.yml"
 _ANY_SELF_REFERENCE_PATTERN = re.compile(r"CodyCBakerPhD/dandi-s3-logs-action(?:/[a-z-]+)?@([\w.-]+)")
 _WORKFLOW_ENV_PATTERN = re.compile(r"\$\{\{\s*env\.")
 
@@ -25,7 +25,7 @@ def _load(path: pathlib.Path) -> dict:
 def test_actions_are_discovered() -> None:
     action_names = [path.parent.name for path in _ACTION_PATHS]
 
-    assert action_names == ["run-command", "upload-summaries"]
+    assert action_names == ["install-packages", "run-command", "upload-summaries"]
 
 
 @pytest.mark.ai_generated
@@ -63,17 +63,36 @@ def test_action_does_not_read_the_calling_workflow_env(action_path: pathlib.Path
 
 
 @pytest.mark.ai_generated
-def test_run_command_checks_its_required_inputs() -> None:
+@pytest.mark.parametrize(
+    ("action_name", "unchecked"),
+    [("run-command", {"command"}), ("install-packages", set())],
+)
+def test_action_checks_its_required_inputs_before_anything_runs(action_name: str, unchecked: set[str]) -> None:
     """A composite action does not enforce `required`, so an empty path would only fail later and less clearly."""
-    action = _load(_RUN_COMMAND_PATH)
-    (step,) = action["runs"]["steps"]
-    environment_names = {value: name for name, value in step["env"].items()}
+    action = _load(_REPOSITORY_ROOT / action_name / "action.yml")
+    first_step = action["runs"]["steps"][0]
+    environment_names = {value: name for name, value in first_step["env"].items()}
 
     for name, specification in action["inputs"].items():
-        if specification.get("required") is not True or name == "command":
+        if specification.get("required") is not True or name in unchecked:
             continue
         variable = environment_names[f"${{{{ inputs.{name} }}}}"]
-        assert f'[ -n "${variable}" ]' in step["run"], name
+        assert f'[ -n "${variable}" ]' in first_step["run"], name
+
+
+@pytest.mark.ai_generated
+def test_install_packages_installs_only_under_the_lock() -> None:
+    """Swapping packages under a running pipeline breaks it midway, so every install takes the shared lock."""
+    install_lines = [
+        line.strip()
+        for step in _load(_INSTALL_PACKAGES_PATH)["runs"]["steps"]
+        for line in step.get("run", "").splitlines()
+        if "pip install" in line
+    ]
+
+    assert install_lines != []
+    for line in install_lines:
+        assert line.startswith('flock -n "$FLOCK_FILE" '), line
 
 
 @pytest.mark.ai_generated

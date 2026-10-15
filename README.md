@@ -4,15 +4,16 @@ GitHub action for running [`s3_log_extraction`](https://github.com/dandi/s3-log-
 
 | Action | What it does |
 | --- | --- |
+| `install-packages` | Installs or upgrades `s3_log_extraction` and the DANDI plugin into the runner's environment, holding the same lock. |
 | `run-command` | Runs an `s3logextraction` or `dandis3logextraction` command under `duct`, holding a machine-wide lock. |
 | `upload-summaries` | Copies the access summaries out of an extraction cache into a cloned repository, then commits and pushes them. |
 
 ## Requirements
 
-The actions run on a self-hosted runner and install nothing. The runner needs:
+The actions run on a self-hosted runner. Only `install-packages` installs anything. The runner needs:
 
 - `flock`.
-- A Python environment with `s3_log_extraction`, `dandi_s3_log_extraction` and `duct` installed.
+- A Python environment with `duct` installed, into which `install-packages` installs `s3_log_extraction` and `dandi_s3_log_extraction`.
 - A `uv` executable.
 
 The commands read their secrets from the job's environment rather than from inputs. Set them in the workflow's `env`:
@@ -21,6 +22,32 @@ The commands read their secrets from the job's environment rather than from inpu
 | --- | --- |
 | `S3_LOG_EXTRACTION_PASSWORD` | Commands that read or write the encrypted cache. |
 | `MAXMIND_ACCOUNT_ID` / `MAXMIND_LICENSE_KEY` | `update summaries`, which geolocates requesters against the GeoLite2 database. |
+
+## Installing the packages
+
+```yaml
+- uses: CodyCBakerPhD/dandi-s3-logs-action/install-packages@v1
+  with:
+    env-path: /data/s3-logs/env
+    uv-path: /data/s3-logs/uv
+    flock-file: /data/s3-logs/flocks/s3logextraction.lock
+```
+
+| Input | Required | Default | Description |
+| --- | --- | --- | --- |
+| `env-path` | yes | | Path to the Python environment to install into. It must run Python 3.14 or newer. |
+| `uv-path` | yes | | Path to the `uv` executable that installs the packages. |
+| `flock-file` | yes | | Lock file shared by every run on the machine. |
+| `s3-log-extraction` | no | `s3_log_extraction[geolocation]>=1.11.2` | Requirement to install `s3_log_extraction` from. |
+| `dandi-s3-log-extraction` | no | `dandi_s3_log_extraction[geolocation] @ git+https://github.com/dandi/dandi-s3-log-extraction.git@main` | Requirement to install the DANDI plugin from. The plugin has no PyPI release yet. |
+
+It installs `s3_log_extraction` first and then the plugin, each with `uv pip install --upgrade`, and reports the versions it ends up with. `s3_log_extraction` is installed explicitly so that its own `geolocation` extra applies. The plugin's extra of the same name only covers the plugin.
+
+To install other versions without waiting on a release of this action, set the two requirement inputs.
+
+The environment's Python is checked first. An older interpreter stops the install with an error naming the environment, since it has to be recreated rather than upgraded.
+
+The install takes the same lock as `run-command`, without waiting. While a pipeline holds it, the install fails at once rather than replacing packages a command is using. Run it from a manually dispatched workflow rather than inside the scheduled ones, so that a scheduled run never changes what it runs.
 
 ## Running a command
 

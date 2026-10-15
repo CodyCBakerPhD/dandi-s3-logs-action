@@ -1,0 +1,74 @@
+name: Install S3 log extraction packages
+description: Install or upgrade `s3_log_extraction` and its DANDI plugin into an environment on a self-hosted runner.
+
+inputs:
+  env-path:
+    description: Path to the Python environment to install into. It must run Python 3.14 or newer.
+    required: true
+  uv-path:
+    description: Path to the `uv` executable that installs the packages.
+    required: true
+  flock-file:
+    description: >-
+      Lock file shared by every run on the machine. The install fails at once, rather than waiting,
+      while a pipeline holds it, so it never swaps packages out from under a running command.
+    required: true
+  s3-log-extraction:
+    description: >-
+      Requirement to install `s3_log_extraction` from. It is installed explicitly, rather than left to
+      the plugin's dependency, so that its own `geolocation` extra is applied. The plugin's extra of the
+      same name only covers the plugin.
+    required: false
+    default: s3_log_extraction[geolocation]>=1.11.2
+  dandi-s3-log-extraction:
+    description: >-
+      Requirement to install the DANDI plugin from. The plugin has no PyPI release yet, so the default
+      installs it from `main`.
+    required: false
+    default: dandi_s3_log_extraction[geolocation] @ git+https://github.com/dandi/dandi-s3-log-extraction.git@main
+
+runs:
+  using: composite
+  steps:
+    # A composite action does not enforce `required`, and an empty path only fails later with a less
+    # obvious error. `s3_log_extraction` 1.11.2 declares `requires-python = ">=3.14"`, and the resolver's
+    # own message for an older interpreter does not say that the environment is what needs replacing.
+    - name: Check the environment
+      shell: bash
+      env:
+        ENV_PATH: ${{ inputs.env-path }}
+        UV_PATH: ${{ inputs.uv-path }}
+        FLOCK_FILE: ${{ inputs.flock-file }}
+      run: |
+        [ -n "$ENV_PATH" ] || { echo "::error::The env-path input must be set."; exit 1; }
+        [ -n "$UV_PATH" ] || { echo "::error::The uv-path input must be set."; exit 1; }
+        [ -n "$FLOCK_FILE" ] || { echo "::error::The flock-file input must be set."; exit 1; }
+        source "$ENV_PATH/bin/activate"
+        python -c 'import sys; sys.exit(0 if sys.version_info >= (3, 14) else 1)' || {
+          echo "::error::The environment at $ENV_PATH runs $(python -V), but s3_log_extraction requires Python 3.14 or newer. Recreate the environment on 3.14 before installing."
+          exit 1
+        }
+
+    - name: Install the packages
+      shell: bash
+      env:
+        ENV_PATH: ${{ inputs.env-path }}
+        UV_PATH: ${{ inputs.uv-path }}
+        FLOCK_FILE: ${{ inputs.flock-file }}
+        S3_LOG_EXTRACTION: ${{ inputs.s3-log-extraction }}
+        DANDI_S3_LOG_EXTRACTION: ${{ inputs.dandi-s3-log-extraction }}
+      run: |
+        set -euo pipefail
+        source "$ENV_PATH/bin/activate"
+        flock -n "$FLOCK_FILE" "$UV_PATH" pip install --upgrade "$S3_LOG_EXTRACTION"
+        flock -n "$FLOCK_FILE" "$UV_PATH" pip install --upgrade "$DANDI_S3_LOG_EXTRACTION"
+
+    - name: Report the installed versions
+      shell: bash
+      env:
+        ENV_PATH: ${{ inputs.env-path }}
+        UV_PATH: ${{ inputs.uv-path }}
+      run: |
+        set -euo pipefail
+        source "$ENV_PATH/bin/activate"
+        "$UV_PATH" pip show s3_log_extraction dandi_s3_log_extraction | grep -E '^(Name|Version):'
