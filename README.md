@@ -4,7 +4,7 @@ GitHub action for running [`s3_log_extraction`](https://github.com/dandi/s3-log-
 
 | Action | What it does |
 | --- | --- |
-| `install-packages` | Installs or upgrades `s3_log_extraction` and the DANDI plugin into the runner's environment, holding the same lock. |
+| `install-packages` | Creates the runner's Python environment if needed, then installs or upgrades `s3_log_extraction`, the DANDI plugin and `duct` in it, holding the same lock. |
 | `run-command` | Runs an `s3logextraction` or `dandis3logextraction` command under `duct`, holding a machine-wide lock. |
 | `upload-summaries` | Copies the access summaries out of an extraction cache into a cloned repository, then commits and pushes them. |
 
@@ -13,8 +13,8 @@ GitHub action for running [`s3_log_extraction`](https://github.com/dandi/s3-log-
 The actions run on a self-hosted runner. Only `install-packages` installs anything. The runner needs:
 
 - `flock`.
-- A Python environment with `duct` installed, into which `install-packages` installs `s3_log_extraction` and `dandi_s3_log_extraction`.
 - A `uv` executable.
+- A Python environment with `s3_log_extraction`, `dandi_s3_log_extraction` and `duct` installed. `install-packages` creates it and installs them.
 
 The commands read their secrets from the job's environment rather than from inputs. Set them in the workflow's `env`:
 
@@ -35,19 +35,30 @@ The commands read their secrets from the job's environment rather than from inpu
 
 | Input | Required | Default | Description |
 | --- | --- | --- | --- |
-| `env-path` | yes | | Path to the Python environment to install into. It must run Python 3.14 or newer. |
-| `uv-path` | yes | | Path to the `uv` executable that installs the packages. |
+| `env-path` | yes | | Path to the Python environment. It is created if missing. |
+| `uv-path` | yes | | Path to the `uv` executable that creates the environment and installs the packages. |
 | `flock-file` | yes | | Lock file shared by every run on the machine. |
-| `s3-log-extraction` | no | `s3_log_extraction[geolocation]>=1.11.2` | Requirement to install `s3_log_extraction` from. |
-| `dandi-s3-log-extraction` | no | `dandi_s3_log_extraction[geolocation] @ git+https://github.com/dandi/dandi-s3-log-extraction.git@main` | Requirement to install the DANDI plugin from. The plugin has no PyPI release yet. |
+| `python-version` | no | `3.14` | Python the environment runs, as `major.minor`. |
+| `s3-log-extraction` | no | `s3_log_extraction[geolocation,remote]>=1.11.10` | Requirement to install `s3_log_extraction` from. |
+| `dandi-s3-log-extraction` | no | `dandi_s3_log_extraction[geolocation,remote] @ git+https://github.com/dandi/dandi-s3-log-extraction.git@main` | Requirement to install the DANDI plugin from. The plugin has no PyPI release yet. |
+| `con-duct` | no | `con-duct` | Requirement to install `duct` from. |
 
-It installs `s3_log_extraction` first and then the plugin, each with `uv pip install --upgrade`, and reports the versions it ends up with. `s3_log_extraction` is installed explicitly so that its own `geolocation` extra applies. The plugin's extra of the same name only covers the plugin.
+The environment at `env-path` is reused from one install to the next:
 
-To install other versions without waiting on a release of this action, set the two requirement inputs.
+- If nothing is there, it is created with `uv venv` on `python-version`. `uv` downloads that Python if the runner does not have it.
+- If an environment is there on `python-version`, the packages are upgraded in place.
+- If an environment is there on any other Python, it is deleted and created again. Only the packages above are installed in the new one, so anything else installed by hand has to be installed again.
+- If something other than a virtual environment is there, the install stops and leaves it alone. A mistyped path is never deleted to make room.
 
-The environment's Python is checked first. An older interpreter stops the install with an error naming the environment, since it has to be recreated rather than upgraded.
+The packages are installed together with `uv pip install --upgrade`, and the versions they end up at are reported. The defaults bring everything the other actions and the extraction need:
 
-The install takes the same lock as `run-command`, without waiting. While a pipeline holds it, the install fails at once rather than replacing packages a command is using. Run it from a manually dispatched workflow rather than inside the scheduled ones, so that a scheduled run never changes what it runs.
+- The `geolocation` extras are needed by `update summaries`.
+- The `remote` extras bring `s5cmd` for remote extraction.
+- `duct` is what `run-command` runs every command under.
+
+To install other versions without waiting on a release of this action, set the requirement inputs.
+
+The whole install holds the same lock as `run-command`, taken without waiting. While a pipeline holds it, the install fails at once rather than changing the environment a command is using. Run it from a manually dispatched workflow rather than inside the scheduled ones, so that a scheduled run never changes what it runs.
 
 ## Running a command
 
