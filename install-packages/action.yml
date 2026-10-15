@@ -10,7 +10,9 @@ inputs:
       than `python-version`. A directory there that is not a virtual environment is left alone.
     required: true
   uv-path:
-    description: Path to the `uv` executable that creates the environment and installs the packages.
+    description: >-
+      Path to the `uv` executable that creates the environment and installs the packages. If nothing is
+      there, the latest `uv` release is downloaded to it from GitHub.
     required: true
   flock-file:
     description: >-
@@ -86,6 +88,25 @@ runs:
         exec 9>>"$FLOCK_FILE"
         flock -n 9 || { echo "::error::Another run holds $FLOCK_FILE. Install once it has finished."; exit 1; }
 
+        # The release archive is fetched rather than astral.sh's install script, so nothing remote is run as a
+        # script, and only `uv` itself is placed, at the exact path given.
+        if [ ! -e "$UV_PATH" ]; then
+          case "$(uname -s)-$(uname -m)" in
+            Linux-x86_64) TARGET=x86_64-unknown-linux-gnu ;;
+            Linux-aarch64) TARGET=aarch64-unknown-linux-gnu ;;
+            *) echo "::error::No uv build is known for $(uname -s) $(uname -m). Install uv at $UV_PATH by hand."; exit 1 ;;
+          esac
+          echo "::notice::No uv at $UV_PATH, so the latest release is downloaded there."
+          DOWNLOAD=$(mktemp -d)
+          trap 'rm -rf "$DOWNLOAD"' EXIT
+          curl --fail --silent --show-error --location --retry 3 \
+            "https://github.com/astral-sh/uv/releases/latest/download/uv-$TARGET.tar.gz" \
+            | tar -xz --strip-components=1 -C "$DOWNLOAD"
+          mkdir -p "$(dirname "$UV_PATH")"
+          install -m 0755 "$DOWNLOAD/uv" "$UV_PATH"
+        fi
+        [ -x "$UV_PATH" ] || { echo "::error::$UV_PATH exists but is not executable, so it is left alone."; exit 1; }
+
         if [ -e "$ENV_PATH" ] && [ ! -f "$ENV_PATH/pyvenv.cfg" ]; then
           echo "::error::$ENV_PATH exists but is not a virtual environment, so it is left alone."
           exit 1
@@ -114,5 +135,6 @@ runs:
         UV_PATH: ${{ inputs.uv-path }}
       run: |
         set -euo pipefail
+        "$UV_PATH" --version
         "$ENV_PATH/bin/python" -V
         "$UV_PATH" pip show --python "$ENV_PATH/bin/python" s3_log_extraction dandi_s3_log_extraction con-duct | grep -E '^(Name|Version):'

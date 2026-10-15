@@ -1,5 +1,5 @@
 name: Upload S3 log summaries
-description: Copy the access summaries out of an extraction cache into a cloned repository, then commit and push them.
+description: Copy the access summaries out of an extraction cache into a clone of their repository, then commit and push them.
 
 inputs:
   extraction-cache-path:
@@ -7,20 +7,56 @@ inputs:
     required: true
   repository-path:
     description: >-
-      Path to a clone of the repository the summaries are published to. Its git configuration must
-      already be able to push, since it is used as found.
+      Path to a clone of the repository the summaries are published to. It is cloned from
+      `repository-url` if nothing is there yet.
     required: true
+  repository-url:
+    description: >-
+      URL to clone the summaries repository from when `repository-path` does not exist, for example
+      `git@github.com:dandi/access-summaries.git`. The clone and every push use the runner user's own git
+      credentials, so the URL should be one they can push to.
+    required: false
+    default: ""
 
 runs:
   using: composite
   steps:
+    # A composite action does not enforce `required`, and an empty path only fails later with a less
+    # obvious error.
+    - name: Check the inputs and clone the repository if needed
+      shell: bash
+      env:
+        EXTRACTION_CACHE_PATH: ${{ inputs.extraction-cache-path }}
+        REPOSITORY_PATH: ${{ inputs.repository-path }}
+        REPOSITORY_URL: ${{ inputs.repository-url }}
+      run: |
+        [ -n "$EXTRACTION_CACHE_PATH" ] || { echo "::error::The extraction-cache-path input must be set."; exit 1; }
+        [ -n "$REPOSITORY_PATH" ] || { echo "::error::The repository-path input must be set."; exit 1; }
+        if [ ! -e "$REPOSITORY_PATH" ]; then
+          [ -n "$REPOSITORY_URL" ] || { echo "::error::Nothing is at $REPOSITORY_PATH. Clone the summaries repository there, or set repository-url."; exit 1; }
+          git clone "$REPOSITORY_URL" "$REPOSITORY_PATH"
+        fi
+        # The path has to be the top of a clone, not merely inside one, or the summaries would be committed to
+        # whatever repository happens to contain it.
+        TOP=$(git -C "$REPOSITORY_PATH" rev-parse --show-toplevel 2>/dev/null) || TOP=""
+        [ "$TOP" = "$(cd "$REPOSITORY_PATH" && pwd -P)" ] \
+          || { echo "::error::$REPOSITORY_PATH is not the top of a git clone, so it is left alone."; exit 1; }
+        # A fresh runner's user may have no git identity, which would stop the commit.
+        if ! git -C "$REPOSITORY_PATH" config user.email >/dev/null; then
+          git -C "$REPOSITORY_PATH" config user.name "github-actions[bot]"
+          git -C "$REPOSITORY_PATH" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        fi
+
     - name: Copy summaries into the repository and push them
       shell: bash
       working-directory: ${{ inputs.extraction-cache-path }}/summaries/
       env:
         EXTRACTION_CACHE_PATH: ${{ inputs.extraction-cache-path }}
         REPOSITORY_PATH: ${{ inputs.repository-path }}
+      # The clone is brought up to date before the copy, so a pull never has to merge over uncommitted files.
       run: |
+        git -C "$REPOSITORY_PATH" pull
+
         mkdir -p "$REPOSITORY_PATH/content/summaries"
         find . -type f -name '*.tsv' -exec cp --parents {} "$REPOSITORY_PATH/content/summaries/" \;
 
@@ -32,9 +68,8 @@ runs:
 
         cd "$REPOSITORY_PATH"
 
-        git pull
-        git branch
-        git status
         git add content
-        git commit -m "update S3 access summary content" || true
+        git status --short
+        # Only an unchanged tree skips the commit. Any other commit failure stops the step.
+        git diff --cached --quiet || git commit -m "update S3 access summary content"
         git push
