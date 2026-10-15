@@ -9,6 +9,9 @@ lives in [`dandi/dandi-s3-log-extraction`](https://github.com/dandi/dandi-s3-log
 
 - These actions are versioned by their own interface, never by the package release they run. They run
   whatever the runner's environment has installed, so a package release changes nothing here.
+- `install-packages` is the one exception. Its defaults name package and Python versions, so changing one changes what
+  every caller that leaves that input unset installs. A caller that needs another version before a release
+  sets the input instead.
 - `VERSION` holds the tag this tree is meant to be published under, and is the only place that tag is
   decided. The tests read it rather than a literal, so a reference left on the previous tag fails before
   the commit lands.

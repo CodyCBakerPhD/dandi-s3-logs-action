@@ -1,0 +1,118 @@
+name: Install S3 log extraction packages
+description: >-
+  Create or update the Python environment on a self-hosted runner that the other actions run from, with
+  `s3_log_extraction`, its DANDI plugin and `duct` installed.
+
+inputs:
+  env-path:
+    description: >-
+      Path to the Python environment. It is created if missing, and recreated if it runs another Python
+      than `python-version`. A directory there that is not a virtual environment is left alone.
+    required: true
+  uv-path:
+    description: Path to the `uv` executable that creates the environment and installs the packages.
+    required: true
+  flock-file:
+    description: >-
+      Lock file shared by every run on the machine. The install fails at once, rather than waiting,
+      while a pipeline holds it, so it never changes the environment under a running command.
+    required: true
+  python-version:
+    description: >-
+      Python the environment runs, as `major.minor`. `uv` provides it if the runner does not have it.
+    required: false
+    default: "3.14"
+  recreate:
+    description: >-
+      Set to `true` to delete the environment and create it again even when it already runs
+      `python-version`, for an environment that has drifted or broken. A directory that is not a virtual
+      environment is still left alone.
+    required: false
+    default: "false"
+  s3-log-extraction:
+    description: >-
+      Requirement to install `s3_log_extraction` from. Its `geolocation` extra is needed by
+      `update summaries`, and its `remote` extra brings `s5cmd` for remote extraction.
+    required: false
+    default: s3_log_extraction[geolocation,remote]>=1.11.10
+  dandi-s3-log-extraction:
+    description: >-
+      Requirement to install the DANDI plugin from. The plugin has no PyPI release yet, so the default
+      installs it from `main`.
+    required: false
+    default: dandi_s3_log_extraction[geolocation,remote] @ git+https://github.com/dandi/dandi-s3-log-extraction.git@main
+  con-duct:
+    description: Requirement to install `duct` from, which `run-command` runs every command under.
+    required: false
+    default: con-duct
+
+runs:
+  using: composite
+  steps:
+    # A composite action does not enforce `required`, and an empty path only fails later with a less
+    # obvious error.
+    - name: Check the inputs
+      shell: bash
+      env:
+        ENV_PATH: ${{ inputs.env-path }}
+        UV_PATH: ${{ inputs.uv-path }}
+        FLOCK_FILE: ${{ inputs.flock-file }}
+        PYTHON_VERSION: ${{ inputs.python-version }}
+        RECREATE: ${{ inputs.recreate }}
+      run: |
+        [ -n "$ENV_PATH" ] || { echo "::error::The env-path input must be set."; exit 1; }
+        [ -n "$UV_PATH" ] || { echo "::error::The uv-path input must be set."; exit 1; }
+        [ -n "$FLOCK_FILE" ] || { echo "::error::The flock-file input must be set."; exit 1; }
+        [[ "$PYTHON_VERSION" =~ ^[0-9]+\.[0-9]+$ ]] || { echo "::error::The python-version input must be major.minor, such as 3.14."; exit 1; }
+        [[ "$RECREATE" =~ ^(true|false)$ ]] || { echo "::error::The recreate input must be true or false."; exit 1; }
+
+    # Everything that changes the environment runs inside this one step, which holds the lock throughout.
+    # Locking each command on its own would let a pipeline start between them and run on a half-built
+    # environment.
+    - name: Prepare the environment and install the packages
+      shell: bash
+      env:
+        ENV_PATH: ${{ inputs.env-path }}
+        UV_PATH: ${{ inputs.uv-path }}
+        FLOCK_FILE: ${{ inputs.flock-file }}
+        PYTHON_VERSION: ${{ inputs.python-version }}
+        RECREATE: ${{ inputs.recreate }}
+        S3_LOG_EXTRACTION: ${{ inputs.s3-log-extraction }}
+        DANDI_S3_LOG_EXTRACTION: ${{ inputs.dandi-s3-log-extraction }}
+        CON_DUCT: ${{ inputs.con-duct }}
+      run: |
+        set -euo pipefail
+        mkdir -p "$(dirname "$FLOCK_FILE")"
+        exec 9>>"$FLOCK_FILE"
+        flock -n 9 || { echo "::error::Another run holds $FLOCK_FILE. Install once it has finished."; exit 1; }
+
+        if [ -e "$ENV_PATH" ] && [ ! -f "$ENV_PATH/pyvenv.cfg" ]; then
+          echo "::error::$ENV_PATH exists but is not a virtual environment, so it is left alone."
+          exit 1
+        fi
+        if [ -f "$ENV_PATH/pyvenv.cfg" ]; then
+          CURRENT=$("$ENV_PATH/bin/python" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null) || CURRENT="no working Python"
+          if [ "$RECREATE" = true ]; then
+            echo "::notice::Recreating $ENV_PATH, as the recreate input asks."
+            rm -rf "$ENV_PATH"
+          elif [ "$CURRENT" != "$PYTHON_VERSION" ]; then
+            echo "::notice::$ENV_PATH runs $CURRENT rather than $PYTHON_VERSION, so it is recreated."
+            rm -rf "$ENV_PATH"
+          fi
+        fi
+        if [ ! -e "$ENV_PATH" ]; then
+          "$UV_PATH" venv --python "$PYTHON_VERSION" "$ENV_PATH"
+        fi
+
+        "$UV_PATH" pip install --python "$ENV_PATH/bin/python" --upgrade \
+          "$S3_LOG_EXTRACTION" "$DANDI_S3_LOG_EXTRACTION" "$CON_DUCT"
+
+    - name: Report the installed versions
+      shell: bash
+      env:
+        ENV_PATH: ${{ inputs.env-path }}
+        UV_PATH: ${{ inputs.uv-path }}
+      run: |
+        set -euo pipefail
+        "$ENV_PATH/bin/python" -V
+        "$UV_PATH" pip show --python "$ENV_PATH/bin/python" s3_log_extraction dandi_s3_log_extraction con-duct | grep -E '^(Name|Version):'
