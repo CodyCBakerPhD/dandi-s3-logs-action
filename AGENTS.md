@@ -9,15 +9,16 @@ lives in [`dandi/dandi-s3-log-extraction`](https://github.com/dandi/dandi-s3-log
 
 - These actions are versioned by their own interface, never by the package release they run. They run
   whatever the runner's environment has installed, so a package release changes nothing here.
-- `install-packages` is the one exception. Its defaults name package and Python versions, so changing one changes what
-  every caller that leaves that input unset installs. A caller that needs another version before a release
-  sets the input instead.
+- `install-packages` is the one exception. Its defaults name package and Python versions, so changing one
+  changes what every caller that leaves that input unset installs. A caller that needs another version before
+  a release sets the input instead.
 - `VERSION` holds the tag this tree is meant to be published under, and is the only place that tag is
   decided. The tests read it rather than a literal, so a reference left on the previous tag fails before
   the commit lands.
 - Every reference to this repository, in the README and in the actions, names that tag. Bump `VERSION`
   in the same commit that rewrites them.
-- Cut a new major tag when an action's inputs or requirements change incompatibly.
+- Every release gets a new tag, even one that only adds an action. A published tag is never moved, so a
+  caller pinned to it keeps running what it reviewed.
 - Release by publishing the draft that `Prepare release draft` keeps on every merge to `main`. Its tag
   name comes from `VERSION` and its target from that commit, so the tag is never typed. It prepares
   nothing when the tag already exists, since moving a published tag is a deliberate act rather than a
