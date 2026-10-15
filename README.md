@@ -13,7 +13,7 @@ GitHub action for running [`s3_log_extraction`](https://github.com/dandi/s3-log-
 The actions run on a self-hosted runner. Only `install-packages` installs anything. The runner needs:
 
 - `flock`.
-- A `uv` executable.
+- `curl` and `tar`, if `install-packages` has to download `uv`.
 - A Python environment with `s3_log_extraction`, `dandi_s3_log_extraction` and `duct` installed. `install-packages` creates it and installs them.
 
 The commands read their secrets from the job's environment rather than from inputs. Set them in the workflow's `env`:
@@ -26,7 +26,7 @@ The commands read their secrets from the job's environment rather than from inpu
 ## Installing the packages
 
 ```yaml
-- uses: CodyCBakerPhD/dandi-s3-logs-action/install-packages@v2
+- uses: CodyCBakerPhD/dandi-s3-logs-action/install-packages@v3
   with:
     env-path: /data/s3-logs/env
     uv-path: /data/s3-logs/uv
@@ -36,13 +36,15 @@ The commands read their secrets from the job's environment rather than from inpu
 | Input | Required | Default | Description |
 | --- | --- | --- | --- |
 | `env-path` | yes | | Path to the Python environment. It is created if missing. |
-| `uv-path` | yes | | Path to the `uv` executable that creates the environment and installs the packages. |
+| `uv-path` | yes | | Path to the `uv` executable that creates the environment and installs the packages. Downloaded there if missing. |
 | `flock-file` | yes | | Lock file shared by every run on the machine. |
 | `python-version` | no | `3.14` | Python the environment runs, as `major.minor`. |
 | `recreate` | no | `false` | Set to `true` to delete the environment and create it again even when it already runs `python-version`. |
 | `s3-log-extraction` | no | `s3_log_extraction[geolocation,remote]>=1.11.10` | Requirement to install `s3_log_extraction` from. |
 | `dandi-s3-log-extraction` | no | `dandi_s3_log_extraction[geolocation,remote] @ git+https://github.com/dandi/dandi-s3-log-extraction.git@main` | Requirement to install the DANDI plugin from. The plugin has no PyPI release yet. |
 | `con-duct` | no | `con-duct` | Requirement to install `duct` from. |
+
+If nothing is at `uv-path`, the latest `uv` release for the runner's platform (Linux x86_64 or aarch64) is downloaded from GitHub and placed there. Only `uv` itself is installed, and no install script is run.
 
 The environment at `env-path` is reused from one install to the next:
 
@@ -64,7 +66,7 @@ The whole install holds the same lock as `run-command`, taken without waiting. W
 ## Running a command
 
 ```yaml
-- uses: CodyCBakerPhD/dandi-s3-logs-action/run-command@v2
+- uses: CodyCBakerPhD/dandi-s3-logs-action/run-command@v3
   with:
     command: update summaries
     flags: --mode archive --cache /data/s3-logs/extraction_cache
@@ -90,7 +92,7 @@ The lock is taken without waiting. A run that starts while another holds the loc
 ## Uploading summaries
 
 ```yaml
-- uses: CodyCBakerPhD/dandi-s3-logs-action/upload-summaries@v2
+- uses: CodyCBakerPhD/dandi-s3-logs-action/upload-summaries@v3
   with:
     extraction-cache-path: /data/s3-logs/extraction_cache
     repository-path: /data/s3-logs/access-summaries
@@ -99,8 +101,11 @@ The lock is taken without waiting. A run that starts while another holds the loc
 | Input | Required | Default | Description |
 | --- | --- | --- | --- |
 | `extraction-cache-path` | yes | | Path to the extraction cache that holds the `summaries` directory and the `ips` region coordinates. |
-| `repository-path` | yes | | Path to a clone of the repository the summaries are published to. |
+| `repository-path` | yes | | Path to a clone of the repository the summaries are published to. Cloned from `repository-url` if nothing is there. |
+| `repository-url` | no | `""` | URL to clone the summaries repository from when `repository-path` does not exist, for example `git@github.com:dandi/access-summaries.git`. |
 
 It copies every `.tsv` under the cache's `summaries` into `content/summaries`. It also copies `totals.json`, `archive_totals.json` and `region_codes_to_coordinates.yaml` into `content`. Generate the totals and the region coordinates first.
 
-The clone is used as found. Its git configuration must already be able to push.
+If nothing is at `repository-path`, it is cloned from `repository-url` first. A path that exists has to be the top of a git clone, or the action stops and leaves it alone. The clone and every push use the runner user's own git credentials, such as an SSH key, so `repository-url` should be one that user can push to.
+
+The clone is pulled before the summaries are copied in, so the pull never merges over uncommitted files. If the runner's user has no git identity, the clone gets a local one as `github-actions[bot]`. The commit is skipped only when nothing changed, so any other commit failure stops the step instead of pushing nothing.
